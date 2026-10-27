@@ -207,6 +207,8 @@ set(LEMON_BACKENDS
     "flm|fastflowlm"
     "ryzenai-llm|ryzenai"
     "vllm|vllm"
+    "cake|cake"
+    "lemonade-burn|burn"
     "thenoise|thenoise"
     "ds4|ds4"
     "cloud|cloud"
