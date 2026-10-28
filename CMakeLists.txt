@@ -217,6 +217,7 @@ set(LEMON_BACKENDS
     "onnxruntime|onnxruntime"
     "trellis|trellis"
     "openmoss|openmoss"
+    "freetoken|freetoken"
 )
 
 # ============================================================
