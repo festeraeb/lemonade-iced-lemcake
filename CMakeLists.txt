@@ -218,6 +218,8 @@ set(LEMON_BACKENDS
     "trellis|trellis"
     "openmoss|openmoss"
     "freetoken|freetoken"
+    "movidius|movidius"
+    "rea|rea"
 )
 
 # ============================================================

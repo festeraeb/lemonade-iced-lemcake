@@ -3267,11 +3267,7 @@ NPUInfo LinuxSystemInfo::get_npu_device() {
     npu.available = false;
 
     fs::path accel_path = "/sys/class/accel";
-    if (!fs::exists(accel_path) || !fs::is_directory(accel_path)) {
-        npu.error = "No NPU device found";
-        return npu;
-    }
-
+    if (fs::exists(accel_path) && fs::is_directory(accel_path)) {
     for (const auto& entry : fs::directory_iterator(accel_path)) {
         if (!entry.is_directory() && !entry.is_symlink()) {
             continue;
@@ -3368,9 +3364,44 @@ NPUInfo LinuxSystemInfo::get_npu_device() {
                 }
         break;
     }
+    }
+
+    // Also probe USB sysfs for Intel Movidius Myriad 2 / Myriad X VPU (VID 03e7)
+    if (!npu.available) {
+        fs::path usb_path = "/sys/bus/usb/devices";
+        std::error_code ec;
+        if (fs::exists(usb_path, ec) && fs::is_directory(usb_path, ec)) {
+            for (const auto& entry : fs::directory_iterator(usb_path, ec)) {
+                fs::path vid_file = entry.path() / "idVendor";
+                fs::path pid_file = entry.path() / "idProduct";
+                if (!fs::exists(vid_file, ec) || !fs::exists(pid_file, ec)) continue;
+                std::ifstream vf(vid_file);
+                std::ifstream pf(pid_file);
+                std::string vid, pid;
+                std::getline(vf, vid);
+                std::getline(pf, pid);
+                if (vid == "03e7") {
+                    npu.available = true;
+                    npu.driver_version = "movidius-rust";
+                    npu.tops_max = 1;
+                    if (pid == "f63b") {
+                        npu.name = "Intel Movidius Myriad 2 VPU (MA2450, 12 SHAVE)";
+                        npu.power_mode = "booted (03e7:f63b)";
+                    } else if (pid == "2150") {
+                        npu.name = "Intel Movidius Myriad 2 VPU (MA2450, 12 SHAVE)";
+                        npu.power_mode = "rom-standby (03e7:2150)";
+                    } else {
+                        npu.name = "Intel Movidius Myriad X VPU (03e7:" + pid + ")";
+                        npu.power_mode = "detected";
+                    }
+                    break;
+                }
+            }
+        }
+    }
 
     if (!npu.available) {
-        npu.error = "No NPU device found with amdxdna driver";
+        npu.error = "No NPU/VPU device found (checked amdxdna and Movidius 03e7 USB)";
     }
 
     return npu;

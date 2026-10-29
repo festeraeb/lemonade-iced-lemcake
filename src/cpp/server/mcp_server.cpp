@@ -1422,7 +1422,92 @@ std::vector<McpTool> McpServer::build_tools() {
             },
             [this](const json& arguments) {
                 return tool_docs(arguments);
+            }),
+        McpTool(
+            json{
+                {"name", "lemonade_rea_inspect"},
+                {"description",
+                 "First-class binary, Linux kernel module (.ko), Movidius VPU firmware (.mvcmd/.sparc.elf), "
+                 "and neural graph (.graph) inspection powered by REA (v6.8.0) and the fleet's open-weight "
+                 "reverse-engineering agent (`rea-agent`). Pass `path` to inspect a local artifact, with "
+                 "optional `subcommand` (e.g. 'inspect-kernel-module', 'inspect-elf-notes', 'inspect-rust-binary', "
+                 "'inspect-go-binary', 'inspect-artifact') or `prompt` to run the open-weight REA agent."},
+                {"inputSchema", {
+                    {"type", "object"},
+                    {"required", json::array({"path"})},
+                    {"properties", {
+                        {"path",       {{"type", "string"},
+                                        {"description", "Absolute path to the binary, .ko driver, .sparc.elf/.mvcmd firmware, or .graph file."}}},
+                        {"subcommand", {{"type", "string"},
+                                        {"description", "Optional REA subcommand (default auto-detected from extension: inspect-kernel-module for .ko, inspect-elf-notes for ELF)."}}},
+                        {"prompt",     {{"type", "string"},
+                                        {"description", "Optional question/instruction for the open-weight REA agent (`rea-agent`). When set, runs multi-step tool-assisted analysis."}}},
+                    }},
+                }},
+            },
+            [this](const json& arguments) {
+                return tool_rea_inspect(arguments);
             })
+    };
+}
+
+json McpServer::tool_rea_inspect(const json& arguments) {
+    const std::string path = extract_string_arg(arguments, "path");
+    const std::string subcmd = arguments.value("subcommand", std::string());
+    const std::string prompt = arguments.value("prompt", std::string());
+
+    for (char c : path) {
+        if (c == '\'' || c == '"' || c == '`' || c == '$' || c == ';' || c == '|' || c == '&' || c == '\n') {
+            return {
+                {"content", json::array({text_content_block("Invalid characters in artifact path.")})},
+                {"isError", true},
+            };
+        }
+    }
+
+    std::string cmd;
+    if (!prompt.empty()) {
+        std::string safe_prompt;
+        for (char c : prompt) {
+            if (c != '\'' && c != '\n' && c != '\r') safe_prompt.push_back(c);
+        }
+        cmd = "/usr/local/bin/rea-agent -t '" + path + "' '" + safe_prompt + "' 2>&1";
+    } else {
+        std::string effective_sub = subcmd;
+        if (effective_sub.empty()) {
+            if (path.size() >= 3 && path.substr(path.size() - 3) == ".ko") {
+                effective_sub = "inspect-kernel-module";
+            } else {
+                effective_sub = "inspect-elf-notes";
+            }
+        }
+        for (char c : effective_sub) {
+            if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '-')) {
+                return {
+                    {"content", json::array({text_content_block("Invalid REA subcommand.")})},
+                    {"isError", true},
+                };
+            }
+        }
+        cmd = "/usr/local/bin/rea " + effective_sub + " '" + path + "' --json 2>&1";
+    }
+
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        return {
+            {"content", json::array({text_content_block("Failed to launch REA process.")})},
+            {"isError", true},
+        };
+    }
+    std::string output;
+    char buf[4096];
+    while (fgets(buf, sizeof(buf), pipe) != nullptr) {
+        output += buf;
+    }
+    const int rc = pclose(pipe);
+    return {
+        {"content", json::array({text_content_block(output)})},
+        {"isError", rc != 0},
     };
 }
 
