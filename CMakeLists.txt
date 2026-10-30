@@ -1028,6 +1028,7 @@ include_directories(
 # ============================================================
 set(SOURCES_CORE
     src/cpp/server/server.cpp
+    src/cpp/server/nexus_tier3.cpp
     src/cpp/server/collection_orchestrator.cpp
     src/cpp/server/jobs/job_ops.cpp
     src/cpp/server/jobs/job_manager.cpp

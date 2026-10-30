@@ -3,6 +3,7 @@
 #include <lemon/cli_parser.h>
 #include <lemon/config_file.h>
 #include <lemon/logging_config.h>
+#include <lemon/nexus_tier3.h>
 #include <lemon/system_info.h>
 #include <lemon/utils/aixlog.hpp>
 #include <lemon/utils/http_client.h>
@@ -240,6 +241,10 @@ int main(int argc, char** argv) {
         Server server(config, cli_config.cache_dir, cli_config.config_dir);
 
         g_server_instance = &server;
+        // Optional Lemonade Nexus Tier 3 membership (config "nexus": {...}).
+        // Loads the Nexus SDK at run time; absent library or config = no mesh.
+        auto nexus_tier3 = lemon::NexusTier3::start_from_config(config_json, cli_config.config_dir,
+                                                                config->port());
         std::signal(SIGINT, signal_handler);
         std::signal(SIGTERM, signal_handler);
 #ifdef SIGHUP
@@ -261,6 +266,7 @@ int main(int argc, char** argv) {
 #endif
 
         server.run();
+        nexus_tier3.reset();  // leaves the mesh before the server tears down
         g_server_instance = nullptr;
 
         // Startup aborted (e.g. port already in use): exit non-zero now and skip
