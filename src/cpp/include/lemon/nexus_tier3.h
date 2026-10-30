@@ -10,6 +10,7 @@
 //   "nexus": {
 //     "enabled": true,
 //     "server": "nexus.example.net:9100",      // a Nexus server's certificate FQDN:port
+//     "genesis_key": "<base64>",                // the network's Genesis public key (required)
 //     "tls": true,                              // default true
 //     "sdk_library": "liblemonade_nexus_sdk.so",// default: the platform's library name
 //     "data_root": "<config dir>/nexus",        // identity.json lives here

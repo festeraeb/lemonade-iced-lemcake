@@ -37,6 +37,7 @@ struct SdkApi {
     ln_error_t (*identity_save)(const ln_identity*, const char*) = nullptr;
     void (*identity_destroy)(ln_identity*) = nullptr;
     ln_error_t (*set_identity)(ln_client*, const ln_identity*) = nullptr;
+    ln_error_t (*set_genesis_key)(ln_client*, const char*, uint64_t) = nullptr;
     ln_error_t (*set_link_token)(ln_client*, const char*) = nullptr;
     ln_error_t (*set_inference_node)(ln_client*, int) = nullptr;
     ln_error_t (*set_device_name)(ln_client*, const char*) = nullptr;
@@ -90,6 +91,7 @@ bool resolve(void* lib, SdkApi& api, std::string& missing) {
     LN_SYM(identity_save, "ln_identity_save");
     LN_SYM(identity_destroy, "ln_identity_destroy");
     LN_SYM(set_identity, "ln_set_identity");
+    LN_SYM(set_genesis_key, "ln_set_genesis_key");
     LN_SYM(set_link_token, "ln_set_link_token");
     LN_SYM(set_inference_node, "ln_set_inference_node");
     LN_SYM(set_device_name, "ln_set_device_name");
@@ -133,6 +135,7 @@ struct Settings {
     std::string data_root;
     std::string link_token;
     std::string device_name;
+    std::string genesis_key;
     uint16_t vport{13305};
     std::string catalog_file;
 };
@@ -157,6 +160,11 @@ bool read_settings(const json& nexus, const std::string& config_dir, Settings& s
     s.link_token = nexus.value("link_token", "");
     if (const char* env = std::getenv("LEMONADE_NEXUS_LINK_TOKEN"); env && *env) s.link_token = env;
     s.device_name = nexus.value("device_name", "");
+    s.genesis_key = nexus.value("genesis_key", "");
+    if (s.genesis_key.empty()) {
+        why = "nexus.genesis_key (base64 Ed25519) is required: the SDK verifies Tier 1 servers from it";
+        return false;
+    }
     if (s.device_name.empty()) s.device_name = hostname();
     s.vport = static_cast<uint16_t>(nexus.value("vport", 13305));
     s.catalog_file = nexus.value("catalog_file", "");
@@ -255,10 +263,18 @@ struct NexusTier3::Impl {
             return;
         }
         api.set_identity(client, identity);
+        if (api.set_genesis_key(client, settings.genesis_key.c_str(), 1) != LN_OK) {
+            LOG(ERROR) << "Nexus: genesis_key is not a base64 Ed25519 public key" << std::endl;
+            api.destroy(client);
+            api.identity_destroy(identity);
+            set_status("failed: genesis key");
+            return;
+        }
         api.set_device_name(client, settings.device_name.c_str());
         // Tier 3 is decided at endpoint creation: before the join, always.
         api.set_inference_node(client, 1);
-        if (!settings.link_token.empty()) api.set_link_token(client, settings.link_token.c_str());
+        bool token_armed = !settings.link_token.empty();
+        if (token_armed) api.set_link_token(client, settings.link_token.c_str());
 
         const std::string catalog_text = catalog.dump();
         const std::string target = "tcp:127.0.0.1:" + std::to_string(lemond_port);
@@ -289,6 +305,15 @@ struct NexusTier3::Impl {
                         LOG(WARNING) << "Nexus: expose of " << target << " failed" << std::endl;
                         set_status("degraded");
                     }
+                } else if (token_armed && reply.find("link token") != std::string::npos) {
+                    // A single-use invite that was already redeemed (this device
+                    // joined before; the identity file persists). An enrolled
+                    // identity authenticates without it, so drop it and retry.
+                    LOG(INFO) << "Nexus: invite refused (" << reply
+                              << "); retrying as an already-enrolled device" << std::endl;
+                    api.set_link_token(client, "");
+                    token_armed = false;
+                    continue;
                 } else {
                     LOG(WARNING) << "Nexus: join failed (rc=" << rc << ") " << reply
                                  << "; retry in " << backoff.count() << "s" << std::endl;
